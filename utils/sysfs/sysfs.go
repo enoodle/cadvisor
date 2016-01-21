@@ -17,6 +17,7 @@ package sysfs
 import (
 	"fmt"
 	"io/ioutil"
+	"net/http"
 	"os"
 	"path"
 	"strconv"
@@ -69,8 +70,19 @@ type SysFs interface {
 }
 
 type realSysFs struct{}
+type realAmazonSysFs struct{ realSysFs }
+
+func isAmazonHosted() bool {
+	if vendor, err := ioutil.ReadFile(path.Join(dmiDir, "id", "bios_version")); err == nil {
+		return strings.Contains(string(vendor), "amazon")
+	}
+	return false
+}
 
 func NewRealSysFs() (SysFs, error) {
+	if isAmazonHosted() {
+		return &realAmazonSysFs{}, nil
+	}
 	return &realSysFs{}, nil
 }
 
@@ -246,4 +258,14 @@ func (self *realSysFs) GetSystemUUID() (string, error) {
 	} else {
 		return "", err
 	}
+}
+
+func (self *realAmazonSysFs) GetSystemUUID() (string, error) {
+	if resp, err := http.Get("http://169.254.169.254/1.0/meta-data/instance-id"); err == nil {
+		defer resp.Body.Close()
+		if id, err := ioutil.ReadAll(resp.Body); err == nil {
+			return strings.TrimSpace(string(id)), nil
+		}
+	}
+	return self.realSysFs.GetSystemUUID()
 }
